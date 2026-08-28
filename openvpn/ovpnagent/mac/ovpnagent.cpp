@@ -315,6 +315,20 @@ class MyListener : public WS::Server::Listener
   private:
     bool allow_client(AsioPolySock::Base &sock) override
     {
+        // Only accept connections from root or the same UID that
+        // the agent process is running as. This prevents any local
+        // unprivileged process from issuing privileged commands.
+        SockOpt::Creds cr;
+        if (!sock.peercreds(cr))
+        {
+            OPENVPN_LOG("ovpnagent: failed to get peer credentials, rejecting connection");
+            return false;
+        }
+        if (!cr.root_or_self_uid())
+        {
+            OPENVPN_LOG("ovpnagent: rejected connection from UID " << cr.uid << " (not root or same user)");
+            return false;
+        }
         return true;
     }
 
@@ -546,7 +560,7 @@ class ServerThread : public ServerThreadBase
         config->http_server_id = OVPNAGENT_NAME_STRING "/" HTTP_SERVER_VERSION;
         config->frame = frame;
         config->stats = tc.stats;
-        config->unix_mode = 0777;
+        config->unix_mode = 0600;
 
         MyClientFactory::Ptr factory = new MyClientFactory();
         listener.reset(new MyListener(io_context_arg, config, tc.listen_list, factory));
